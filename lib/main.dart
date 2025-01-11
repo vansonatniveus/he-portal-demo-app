@@ -213,6 +213,37 @@ class _MyHomePageState extends State<MyHomePage> {
     for (var env in Environment.values) env: users[0]
   };
 
+  final Map<Environment, TextEditingController> _uuidControllers = {
+    for (var env in Environment.values) 
+      env: TextEditingController()
+  };
+  
+  final Map<Environment, bool> _isValidUuids = {
+    for (var env in Environment.values)
+      env: false
+  };
+
+  final Map<Environment, String?> _apiErrors = {
+    for (var env in Environment.values)
+      env: null
+  };
+
+  @override
+  void dispose() {
+    for (var controller in _uuidControllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  bool _validateUuid(String uuid) {
+    final RegExp uuidRegExp = RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+      caseSensitive: false,
+    );
+    return uuidRegExp.hasMatch(uuid);
+  }
+
   void _openWebView(String url, String title) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -275,7 +306,7 @@ class _MyHomePageState extends State<MyHomePage> {
         },
         body: jsonEncode(payload),
       ).timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10),
         onTimeout: () {
           log('Request timed out');
           throw TimeoutException('The request timed out');
@@ -327,7 +358,7 @@ class _MyHomePageState extends State<MyHomePage> {
         },
         body: Uri(queryParameters: formData).query,
       ).timeout(
-        const Duration(seconds: 30),
+        const Duration(seconds: 10),
         onTimeout: () {
           log('Auth request timed out');
           throw TimeoutException('Auth request timed out');
@@ -542,6 +573,138 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  Future<void> _handleContinueJourney(Environment env) async {
+    try {
+      final prospectId = _uuidControllers[env]!.text;
+      final user = _selectedUsers[env]!;
+      
+      log('=== Starting Continue Journey Request ===');
+      log('Environment: ${env.displayName}');
+      log('Base URL: ${env.baseUrl}');
+      log('Auth URL: ${env.authUrl}');
+      log('Prospect ID: $prospectId');
+      
+      _accessToken = await _getAuthToken(env.authUrl);
+      if (_accessToken == null) {
+        log('Failed to get auth token');
+        return;
+      }
+
+      final payload = {
+        "agentCode": "1337ab2d-ef71-4465-b6dc-d598e9967940",
+        "integrationUserId": user.integrationUserId,
+      };
+
+      log('Continue Journey Payload:');
+      log(JsonEncoder.withIndent('  ').convert(payload));
+
+      _showLoadingDialog();
+
+      final url = '${env.continueUrl}/$prospectId/resume-journey';
+      log('Continue Journey URL: $url');
+
+      final response = await http.put(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_accessToken',
+          'x-trace-id': '${DateTime.now().millisecondsSinceEpoch}',
+        },
+        body: jsonEncode(payload),
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          log('Request timed out');
+          throw TimeoutException('The request timed out');
+        },
+      );
+
+      log('Continue Journey Response Status: ${response.statusCode}');
+      log('Continue Journey Response Headers: ${response.headers}');
+      log('Continue Journey Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        log('Continue Journey Response Data:');
+        log(JsonEncoder.withIndent('  ').convert(responseData));
+        
+        // Check for error in response footer first
+        if (responseData['responseFooter']?['status'] == 'FAILED') {
+          final validationMessage = responseData['responseFooter']?['validations']?['validations']?[0]?['detail'] ??
+                                  responseData['responseFooter']?['validations']?['message'] ??
+                                  responseData['responseFooter']?['message'] ??
+                                  'Unknown error occurred';
+          setState(() {
+            _apiErrors[env] = validationMessage;
+          });
+          if (context.mounted) {
+            Navigator.pop(context); // Dismiss loading
+          }
+          return; // Return early without navigating to webview
+        }
+
+        // Only proceed to webview if we have valid responseData
+        if (responseData['responseData'] != null) {
+          final redirectUrl = env.modifyRedirectUrl(responseData['responseData']);
+          log('Original Redirect URL: ${responseData['responseData']}');
+          log('Modified Redirect URL: $redirectUrl');
+          
+          if (context.mounted) {
+            Navigator.pop(context); // Dismiss loading
+            _navigateToWebView(redirectUrl, 'Portal ${env.displayName}');
+          }
+        } else {
+          if (context.mounted) {
+            Navigator.pop(context); // Dismiss loading
+          }
+          setState(() {
+            _apiErrors[env] = 'No redirect URL in response';
+          });
+        }
+      } else {
+        if (context.mounted) {
+          Navigator.pop(context); // Dismiss loading
+        }
+        setState(() {
+          _apiErrors[env] = 'Invalid Prospect ID';
+        });
+      }
+    } catch (e, stackTrace) {
+      log('Error in continue journey: $e');
+      log('Stack trace: $stackTrace');
+      if (context.mounted) {
+        Navigator.pop(context); // Ensure loading is dismissed
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Error'),
+            content: Text('Failed to continue journey: $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } finally {
+      log('=== End Continue Journey Request ===\n');
+    }
+  }
+
+  void _handleDropoff(Environment env) {
+    final prospectId = _uuidControllers[env]!.text;
+    final dropoffUrl = '${env.dropoffUrl}?prospectId=$prospectId';
+    
+    log('=== Handling Dropoff ===');
+    log('Environment: ${env.displayName}');
+    log('Prospect ID: $prospectId');
+    log('Dropoff URL: $dropoffUrl');
+    
+    _navigateToWebView(dropoffUrl, 'Dropoff ${env.displayName}');
+  }
+
   void _showDeviceInfo() async {
     final deviceInfo = DeviceInfoPlugin();
     
@@ -630,13 +793,14 @@ class _MyHomePageState extends State<MyHomePage> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.2),
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
                               borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
                             ),
                             child: Text(
                               env.displayName,
                               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                 fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.primary,
                               ),
                               textAlign: TextAlign.center,
                             ),
@@ -691,6 +855,68 @@ class _MyHomePageState extends State<MyHomePage> {
                                       label: const Text('Quick Quote'),
                                     ),
                                   ],
+                                ),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.3),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      TextField(
+                                        controller: _uuidControllers[env],
+                                        decoration: InputDecoration(
+                                          labelText: 'Prospect ID',
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          errorText: _apiErrors[env] ?? 
+                                            (_uuidControllers[env]!.text.isNotEmpty && !_isValidUuids[env]!
+                                              ? 'Please enter valid Prospect ID'
+                                              : null),
+                                        ),
+                                        onTap: () {
+                                          if (_uuidControllers[env]!.text.isEmpty) {
+                                            _uuidControllers[env]!.clear();
+                                          }
+                                          // Clear API error when user starts typing again
+                                          if (_apiErrors[env] != null) {
+                                            setState(() {
+                                              _apiErrors[env] = null;
+                                            });
+                                          }
+                                        },
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _isValidUuids[env] = _validateUuid(value);
+                                            // Clear API error when user changes the input
+                                            _apiErrors[env] = null;
+                                          });
+                                        },
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                        children: [
+                                          ElevatedButton.icon(
+                                            onPressed: _isValidUuids[env]! ? () => _handleContinueJourney(env) : null,
+                                            icon: const Icon(Icons.play_arrow),
+                                            label: const Text('Continue'),
+                                          ),
+                                          ElevatedButton.icon(
+                                            onPressed: _isValidUuids[env]! ? () => _handleDropoff(env) : null,
+                                            icon: const Icon(Icons.stop),
+                                            label: const Text('Drop-Off'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),

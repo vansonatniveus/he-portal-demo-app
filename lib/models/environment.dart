@@ -21,16 +21,42 @@ enum Environment {
   final String displayName;
   const Environment(this.displayName);
 
-  String get resumeUrl => switch (this) {
-    Environment.localhost => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway/resume-journey',
-    Environment.dev => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway/resume-journey',
-    Environment.devNiveus => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway/resume-journey',
-    Environment.qa => 'https://devapigee.itnext-dev.com/healthportal-qa/internal/v1/integration-gateway/resume-journey',
-    Environment.qaNiveus => 'https://devapigee.itnext-dev.com/healthportal-qa/internal/v1/integration-gateway/resume-journey',
-    Environment.uat => 'https://devapigee.itnext-dev.com/healthportal/internal/v1/integration-gateway/resume-journey',
+  String get baseUrl => switch (this) {
+    Environment.localhost => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway',
+    Environment.dev => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway',
+    Environment.devNiveus => 'https://devapigee.itnext-dev.com/healthportal-dev/internal/v1/integration-gateway',
+    Environment.qa => 'https://devapigee.itnext-dev.com/healthportal-qa/internal/v1/integration-gateway',
+    Environment.qaNiveus => 'https://devapigee.itnext-dev.com/healthportal-qa/internal/v1/integration-gateway',
+    Environment.uat => 'https://devapigee.itnext-dev.com/healthportal/internal/v1/integration-gateway',
   };
 
-  String get baseUrl => resumeUrl;
+  String get dropoffUrl => switch (this) {
+    Environment.localhost => 'http://localhost:3000/dropoff-journey',
+    Environment.dev => 'https://hp-dev.itnext-dev.com/dropoff-journey',
+    Environment.devNiveus => 'https://hp-dev.itnext-dev.com//v2/new/dropoff-journey',
+    Environment.qa => 'https://hp-qa.itnext-dev.com/dropoff-journey',
+    Environment.qaNiveus => 'https://hp-qa.itnext-dev.com/dropoff-journey',
+    Environment.uat => 'https://hp.test-uat.com/dropoff-journey',
+  };
+
+  String get resumeUrl => switch (this) {
+    Environment.localhost => '$baseUrl/resume-journey',
+    Environment.dev => '$baseUrl/resume-journey',
+    Environment.devNiveus => '$baseUrl/resume-journey',
+    Environment.qa => '$baseUrl/resume-journey',
+    Environment.qaNiveus => '$baseUrl/resume-journey',
+    Environment.uat => '$baseUrl/resume-journey',
+  };
+
+  String get continueUrl => switch (this) {
+    Environment.localhost => baseUrl,
+    Environment.dev => baseUrl,
+    Environment.devNiveus => baseUrl,
+    Environment.qa => baseUrl,
+    Environment.qaNiveus => baseUrl,
+    Environment.uat => baseUrl,
+  };
+
   String get authUrl => 'https://devapigee.itnext-dev.com/api/v1/auth/token';
 
   String modifyRedirectUrl(String url) {
